@@ -22,6 +22,10 @@
                 <div class="admin-name" id="admin-name">Super Admin</div>
                 <div class="admin-email" id="admin-email">Đang tải...</div>
             </div>
+            <button class="btn btn-logout" onclick="handleLogout()">
+                <span class="material-symbols-outlined">logout</span>
+                Đăng xuất
+            </button>
         </div>
     </header>
 
@@ -63,6 +67,70 @@
                     <h3>User/Player</h3>
                     <div class="number" id="total-players">0</div>
                 </div>
+            </div>
+        </div>
+
+        <!-- Revenue Report Section -->
+        <div class="filter-section">
+            <div class="filter-title">
+                <span class="material-symbols-outlined">analytics</span>
+                Báo cáo doanh thu theo chuỗi cửa hàng
+            </div>
+            <div class="filter-row">
+                <div class="filter-group">
+                    <label>🏪 Chọn chuỗi cửa hàng (Owner)</label>
+                    <select id="revenue-owner-filter">
+                        <option value="all">Tất cả chuỗi cửa hàng</option>
+                    </select>
+                </div>
+                <div class="filter-group">
+                    <label>📅 Loại báo cáo</label>
+                    <select id="revenue-period-type">
+                        <option value="week">Theo tuần</option>
+                        <option value="month">Theo tháng</option>
+                        <option value="year">Theo năm</option>
+                    </select>
+                </div>
+                <div class="filter-group" id="week-selector" style="display: block;">
+                    <label>📆 Chọn tuần</label>
+                    <input type="week" id="revenue-week" class="date-input">
+                </div>
+                <div class="filter-group" id="month-selector" style="display: none;">
+                    <label>📆 Chọn tháng</label>
+                    <input type="month" id="revenue-month" class="date-input">
+                </div>
+                <div class="filter-group" id="year-selector" style="display: none;">
+                    <label>📆 Chọn năm</label>
+                    <input type="number" id="revenue-year" class="date-input" min="2020" max="2030" placeholder="Năm">
+                </div>
+            </div>
+            <div class="filter-actions">
+                <button class="btn btn-primary" onclick="loadRevenueReport()">
+                    <span class="material-symbols-outlined">summarize</span>
+                    Xem báo cáo
+                </button>
+                <button class="btn btn-secondary" onclick="exportRevenueReport()">
+                    <span class="material-symbols-outlined">download</span>
+                    Xuất báo cáo
+                </button>
+            </div>
+            <!-- Revenue Display -->
+            <div id="revenue-display" class="revenue-display" style="display: none;">
+                <div class="revenue-summary">
+                    <div class="revenue-card">
+                        <div class="revenue-label">Tổng doanh thu</div>
+                        <div class="revenue-value" id="total-revenue">0 đ</div>
+                    </div>
+                    <div class="revenue-card">
+                        <div class="revenue-label">Số đơn hàng</div>
+                        <div class="revenue-value" id="total-orders">0</div>
+                    </div>
+                    <div class="revenue-card">
+                        <div class="revenue-label">Doanh thu trung bình/đơn</div>
+                        <div class="revenue-value" id="avg-revenue">0 đ</div>
+                    </div>
+                </div>
+                <div id="revenue-details"></div>
             </div>
         </div>
 

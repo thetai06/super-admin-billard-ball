@@ -3,6 +3,7 @@ let currentSuperAdmin = null;
 let allUsers = [];
 let filteredUsers = [];
 let allOwners = new Set();
+let revenueData = {};
 
 /**
  * Khởi tạo trang Super Admin
@@ -26,10 +27,53 @@ document.addEventListener('DOMContentLoaded', function() {
             setupEventListeners();
         } else {
             console.log('❌ Chưa đăng nhập, chuyển hướng...');
-            window.location.href = '../login.html';
+            window.location.href = '../Admin/login.html';
         }
     });
+    
+    // Thiết lập date inputs với giá trị mặc định
+    setDefaultDates();
 });
+
+/**
+ * Thiết lập giá trị mặc định cho date inputs
+ */
+function setDefaultDates() {
+    const today = new Date();
+    
+    // Week
+    const weekInput = document.getElementById('revenue-week');
+    if (weekInput) {
+        const year = today.getFullYear();
+        const week = getWeekNumber(today);
+        weekInput.value = `${year}-W${week.toString().padStart(2, '0')}`;
+    }
+    
+    // Month
+    const monthInput = document.getElementById('revenue-month');
+    if (monthInput) {
+        const year = today.getFullYear();
+        const month = (today.getMonth() + 1).toString().padStart(2, '0');
+        monthInput.value = `${year}-${month}`;
+    }
+    
+    // Year
+    const yearInput = document.getElementById('revenue-year');
+    if (yearInput) {
+        yearInput.value = today.getFullYear();
+    }
+}
+
+/**
+ * Lấy số tuần trong năm
+ */
+function getWeekNumber(date) {
+    const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+    const dayNum = d.getUTCDay() || 7;
+    d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+    const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+    return Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+}
 
 /**
  * Thiết lập event listeners
@@ -38,6 +82,7 @@ function setupEventListeners() {
     const searchInput = document.getElementById('search-input');
     const roleFilter = document.getElementById('role-filter');
     const ownerFilter = document.getElementById('owner-filter');
+    const periodType = document.getElementById('revenue-period-type');
     
     if (searchInput) {
         searchInput.addEventListener('input', debounce(applyFilters, 300));
@@ -50,6 +95,24 @@ function setupEventListeners() {
     if (ownerFilter) {
         ownerFilter.addEventListener('change', applyFilters);
     }
+    
+    if (periodType) {
+        periodType.addEventListener('change', togglePeriodSelector);
+    }
+}
+
+/**
+ * Toggle hiển thị selector theo loại báo cáo
+ */
+function togglePeriodSelector() {
+    const periodType = document.getElementById('revenue-period-type').value;
+    const weekSelector = document.getElementById('week-selector');
+    const monthSelector = document.getElementById('month-selector');
+    const yearSelector = document.getElementById('year-selector');
+    
+    weekSelector.style.display = periodType === 'week' ? 'block' : 'none';
+    monthSelector.style.display = periodType === 'month' ? 'block' : 'none';
+    yearSelector.style.display = periodType === 'year' ? 'block' : 'none';
 }
 
 /**
@@ -65,6 +128,24 @@ function debounce(func, wait) {
         clearTimeout(timeout);
         timeout = setTimeout(later, wait);
     };
+}
+
+/**
+ * Xử lý đăng xuất
+ */
+function handleLogout() {
+    const confirmed = confirm('Bạn có chắc chắn muốn đăng xuất?');
+    if (confirmed) {
+        firebase.auth().signOut()
+            .then(() => {
+                console.log('✅ Đăng xuất thành công');
+                window.location.href = '../';
+            })
+            .catch((error) => {
+                console.error('❌ Lỗi đăng xuất:', error);
+                alert('Có lỗi xảy ra khi đăng xuất. Vui lòng thử lại!');
+            });
+    }
 }
 
 /**
@@ -98,6 +179,7 @@ function loadAllUsers() {
             
             // Cập nhật dropdown owner filter
             updateOwnerFilter();
+            updateRevenueOwnerFilter();
             
             // Cập nhật thống kê
             updateStatistics();
@@ -124,10 +206,33 @@ function updateOwnerFilter() {
     
     // Thêm các owner
     allOwners.forEach(ownerId => {
+        const ownerUser = allUsers.find(u => u.id === ownerId);
+        const ownerName = ownerUser ? ownerUser.name : 'Chưa có tên';
         const option = document.createElement('option');
         option.value = ownerId;
-        option.textContent = `Owner: ${ownerId.substring(0, 8)}...`;
+        option.textContent = `${ownerName} (${ownerId.substring(0, 8)}...)`;
         ownerFilter.appendChild(option);
+    });
+}
+
+/**
+ * Cập nhật dropdown owner filter cho báo cáo doanh thu
+ */
+function updateRevenueOwnerFilter() {
+    const revenueOwnerFilter = document.getElementById('revenue-owner-filter');
+    if (!revenueOwnerFilter) return;
+    
+    // Giữ option "Tất cả chuỗi cửa hàng"
+    revenueOwnerFilter.innerHTML = '<option value="all">Tất cả chuỗi cửa hàng</option>';
+    
+    // Thêm các owner
+    allOwners.forEach(ownerId => {
+        const ownerUser = allUsers.find(u => u.id === ownerId);
+        const ownerName = ownerUser ? ownerUser.name : 'Chưa có tên';
+        const option = document.createElement('option');
+        option.value = ownerId;
+        option.textContent = `${ownerName} (${ownerId.substring(0, 8)}...)`;
+        revenueOwnerFilter.appendChild(option);
     });
 }
 
@@ -157,6 +262,233 @@ function updateStatistics() {
     document.getElementById('total-owners').textContent = stats.owners;
     document.getElementById('total-managers').textContent = stats.managers;
     document.getElementById('total-players').textContent = stats.players;
+}
+
+/**
+ * Tải báo cáo doanh thu
+ */
+function loadRevenueReport() {
+    const ownerFilter = document.getElementById('revenue-owner-filter').value;
+    const periodType = document.getElementById('revenue-period-type').value;
+    
+    let startDate, endDate;
+    
+    if (periodType === 'week') {
+        const weekValue = document.getElementById('revenue-week').value;
+        if (!weekValue) {
+            alert('Vui lòng chọn tuần!');
+            return;
+        }
+        const [year, week] = weekValue.split('-W');
+        const dates = getWeekDates(parseInt(year), parseInt(week));
+        startDate = dates.start;
+        endDate = dates.end;
+    } else if (periodType === 'month') {
+        const monthValue = document.getElementById('revenue-month').value;
+        if (!monthValue) {
+            alert('Vui lòng chọn tháng!');
+            return;
+        }
+        const [year, month] = monthValue.split('-');
+        startDate = new Date(year, month - 1, 1);
+        endDate = new Date(year, month, 0, 23, 59, 59);
+    } else if (periodType === 'year') {
+        const yearValue = document.getElementById('revenue-year').value;
+        if (!yearValue) {
+            alert('Vui lòng nhập năm!');
+            return;
+        }
+        startDate = new Date(yearValue, 0, 1);
+        endDate = new Date(yearValue, 11, 31, 23, 59, 59);
+    }
+    
+    console.log('📊 Tải báo cáo doanh thu:', { ownerFilter, periodType, startDate, endDate });
+    
+    db.ref('dataBookTable') 
+        .once('value', (snapshot) => {
+            revenueData = {};
+            let totalRevenue = 0;
+            let totalOrders = 0;
+            
+            if (snapshot.exists()) {
+                snapshot.forEach((child) => {
+                    const booking = child.val();
+                    const bookingDate = new Date(booking.createdAt || booking.dateTime); 
+                    
+                    if (bookingDate >= startDate && bookingDate <= endDate) {
+                        
+                        if (ownerFilter === 'all' || booking.storeOwnerId === ownerFilter) {
+                            
+                            const ownerId = booking.storeOwnerId || 'unknown';
+                            const storeId = booking.storeId || 'unknown';
+                            
+                            const revenue = parseFloat(booking.money || 0); 
+                            
+                            if (!revenueData[ownerId]) {
+                                revenueData[ownerId] = {
+                                    total: 0,
+                                    orders: 0,
+                                    stores: {}
+                                };
+                            }
+                            
+                            if (!revenueData[ownerId].stores[storeId]) {
+                                revenueData[ownerId].stores[storeId] = {
+                                    revenue: 0,
+                                    orders: 0
+                                };
+                            }
+                            
+                            revenueData[ownerId].total += revenue;
+                            revenueData[ownerId].orders += 1;
+                            revenueData[ownerId].stores[storeId].revenue += revenue;
+                            revenueData[ownerId].stores[storeId].orders += 1;
+                            
+                            totalRevenue += revenue;
+                            totalOrders += 1;
+                        }
+                    }
+                });
+            }
+            
+            console.log('✅ Dữ liệu doanh thu:', revenueData);
+            displayRevenueReport(totalRevenue, totalOrders);
+        })
+        .catch(error => {
+            console.error('❌ Lỗi tải doanh thu:', error);
+            alert('Không thể tải dữ liệu doanh thu. Vui lòng thử lại!');
+        });
+}
+/**
+ * Lấy ngày bắt đầu và kết thúc của tuần
+ */
+function getWeekDates(year, week) {
+    const simple = new Date(year, 0, 1 + (week - 1) * 7);
+    const dow = simple.getDay();
+    const ISOweekStart = simple;
+    if (dow <= 4)
+        ISOweekStart.setDate(simple.getDate() - simple.getDay() + 1);
+    else
+        ISOweekStart.setDate(simple.getDate() + 8 - simple.getDay());
+    
+    const start = new Date(ISOweekStart);
+    const end = new Date(ISOweekStart);
+    end.setDate(end.getDate() + 6);
+    end.setHours(23, 59, 59);
+    
+    return { start, end };
+}
+
+/**
+ * Hiển thị báo cáo doanh thu
+ */
+function displayRevenueReport(totalRevenue, totalOrders) {
+    const revenueDisplay = document.getElementById('revenue-display');
+    const revenueDetails = document.getElementById('revenue-details');
+    
+    if (!revenueDisplay || !revenueDetails) return;
+    
+    // Hiển thị tổng quan
+    document.getElementById('total-revenue').textContent = formatCurrency(totalRevenue);
+    document.getElementById('total-orders').textContent = totalOrders;
+    document.getElementById('avg-revenue').textContent = totalOrders > 0 
+        ? formatCurrency(totalRevenue / totalOrders) 
+        : '0 đ';
+    
+    // Hiển thị chi tiết theo owner
+    let detailsHTML = '<div class="revenue-details">';
+    
+    if (Object.keys(revenueData).length === 0) {
+        detailsHTML += '<p style="text-align: center; color: #777;">Không có dữ liệu doanh thu trong khoảng thời gian này</p>';
+    } else {
+        for (const [ownerId, data] of Object.entries(revenueData)) {
+            const ownerUser = allUsers.find(u => u.id === ownerId);
+            const ownerName = ownerUser ? ownerUser.name : 'Chưa xác định';
+            
+            detailsHTML += `
+                <div class="owner-revenue-item">
+                    <div class="owner-revenue-header">
+                        <div class="owner-name">🏪 ${ownerName}</div>
+                        <div class="owner-total">${formatCurrency(data.total)}</div>
+                    </div>
+                    <div class="store-list">
+            `;
+            
+            for (const [storeId, storeData] of Object.entries(data.stores)) {
+                detailsHTML += `
+                    <div class="store-item">
+                        <span class="store-name">📍 Cửa hàng ${storeId.substring(0, 8)}... (${storeData.orders} đơn)</span>
+                        <span class="store-revenue">${formatCurrency(storeData.revenue)}</span>
+                    </div>
+                `;
+            }
+            
+            detailsHTML += `
+                    </div>
+                </div>
+            `;
+        }
+    }
+    
+    detailsHTML += '</div>';
+    revenueDetails.innerHTML = detailsHTML;
+    revenueDisplay.style.display = 'block';
+}
+
+/**
+ * Format tiền tệ
+ */
+function formatCurrency(amount) {
+    return new Intl.NumberFormat('vi-VN', {
+        style: 'currency',
+        currency: 'VND'
+    }).format(amount);
+}
+
+/**
+ * Xuất báo cáo doanh thu
+ */
+function exportRevenueReport() {
+    if (Object.keys(revenueData).length === 0) {
+        alert('Chưa có dữ liệu để xuất. Vui lòng tải báo cáo trước!');
+        return;
+    }
+    
+    const periodType = document.getElementById('revenue-period-type').value;
+    let periodText = '';
+    
+    if (periodType === 'week') {
+        periodText = `Tuần ${document.getElementById('revenue-week').value}`;
+    } else if (periodType === 'month') {
+        periodText = `Tháng ${document.getElementById('revenue-month').value}`;
+    } else if (periodType === 'year') {
+        periodText = `Năm ${document.getElementById('revenue-year').value}`;
+    }
+    
+    let csvContent = `BÁO CÁO DOANH THU - ${periodText}\n\n`;
+    csvContent += `Owner,Cửa hàng,Doanh thu,Số đơn\n`;
+    
+    for (const [ownerId, data] of Object.entries(revenueData)) {
+        const ownerUser = allUsers.find(u => u.id === ownerId);
+        const ownerName = ownerUser ? ownerUser.name : 'Chưa xác định';
+        
+        for (const [storeId, storeData] of Object.entries(data.stores)) {
+            csvContent += `"${ownerName}","${storeId}",${storeData.revenue},${storeData.orders}\n`;
+        }
+    }
+    
+    // Tạo file và download
+    const blob = new Blob(["\ufeff" + csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    link.setAttribute('download', `bao-cao-doanh-thu-${periodText}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    
+    console.log('✅ Đã xuất báo cáo');
 }
 
 /**
@@ -409,62 +741,4 @@ function editUser(userId) {
             console.error('❌ Lỗi cập nhật:', error);
             alert('❌ Không thể cập nhật. Vui lòng thử lại!');
         });
-}
-
-/**
- * Xác nhận xóa người dùng
- */
-function confirmDeleteUser(userId, userName) {
-    const confirmed = confirm(`
-⚠️ XÁC NHẬN XÓA NGƯỜI DÙNG
-
-Bạn có chắc chắn muốn xóa người dùng "${userName}"?
-
-⚠️ CẢNH BÁO: Hành động này không thể hoàn tác!
-- Tất cả dữ liệu của người dùng sẽ bị xóa vĩnh viễn
-- Các đơn đặt bàn liên quan có thể bị ảnh hưởng
-
-Nhấn OK để xác nhận xóa.
-    `);
-    
-    if (confirmed) {
-        deleteUser(userId, userName);
-    }
-}
-
-/**
- * Xóa người dùng
- */
-function deleteUser(userId, userName) {
-    console.log('🗑️ Đang xóa người dùng:', userId);
-    
-    db.ref('dataUser/' + userId)
-        .remove()
-        .then(() => {
-            console.log('✅ Đã xóa người dùng thành công');
-            alert(`✅ Đã xóa người dùng "${userName}" thành công!`);
-            loadAllUsers(); // Reload
-        })
-        .catch(error => {
-            console.error('❌ Lỗi xóa người dùng:', error);
-            alert('❌ Không thể xóa người dùng. Vui lòng thử lại!');
-        });
-}
-
-/**
- * Hiển thị lỗi
- */
-function showError(message) {
-    const wrapper = document.getElementById('table-wrapper');
-    if (wrapper) {
-        wrapper.innerHTML = `
-            <div class="empty-state">
-                <div class="icon">
-                    <span class="material-symbols-outlined" style="color: #d32f2f;">error</span>
-                </div>
-                <h3>Có lỗi xảy ra</h3>
-                <p>${message}</p>
-            </div>
-        `;
-    }
 }
