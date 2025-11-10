@@ -30,7 +30,6 @@
     </header>
 
     <div class="main-container">
-        <!-- Statistics -->
         <div class="stats-grid">
             <div class="stat-card">
                 <div class="stat-icon total">
@@ -70,7 +69,6 @@
             </div>
         </div>
 
-        <!-- Revenue Report Section -->
         <div class="filter-section">
             <div class="filter-title">
                 <span class="material-symbols-outlined">analytics</span>
@@ -114,7 +112,6 @@
                     Xuất báo cáo
                 </button>
             </div>
-            <!-- Revenue Display -->
             <div id="revenue-display" class="revenue-display" style="display: none;">
                 <div class="revenue-summary">
                     <div class="revenue-card">
@@ -134,7 +131,6 @@
             </div>
         </div>
 
-        <!-- Filters -->
         <div class="filter-section">
             <div class="filter-title">
                 <span class="material-symbols-outlined">filter_alt</span>
@@ -149,8 +145,7 @@
                     <label>🎭 Vai trò</label>
                     <select id="role-filter">
                         <option value="all">Tất cả vai trò</option>
-                        <option value="admin">Owner/Admin</option>
-                        <option value="manager">Manager</option>
+                        <option value="owner">Owner/Admin</option> <option value="manager">Manager</option>
                         <option value="user">User/Player</option>
                     </select>
                 </div>
@@ -170,10 +165,13 @@
                     <span class="material-symbols-outlined">refresh</span>
                     Đặt lại
                 </button>
+                <button class="btn btn-success" onclick="openUserModal('add')">
+                    <span class="material-symbols-outlined">add</span>
+                    Thêm người dùng mới
+                </button>
             </div>
         </div>
 
-        <!-- Users Table -->
         <div class="table-container">
             <div class="table-header">
                 <h2>
@@ -194,9 +192,119 @@
         </div>
     </div>
 
+    <div id="user-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="modal-title">Thêm Người dùng mới</h2>
+                <span class="close-btn" onclick="closeUserModal()">&times;</span>
+            </div>
+            <div class="modal-body">
+                <form id="user-form" onsubmit="handleUserFormSubmit(event)">
+                    <input type="hidden" id="user-form-mode">
+                    <input type="hidden" id="user-form-id">
+                    
+                    <div class="form-group">
+                        <label for="user-name">Họ và tên:</label>
+                        <input type="text" id="user-name" required>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="user-email">Email (dùng để đăng nhập):</label>
+                        <input type="email" id="user-email" required>
+                    </div>
+                    
+                    <div class="form-group" id="password-group">
+                        <label for="user-password">Mật khẩu:</label>
+                        <input type="password" id="user-password" required minlength="6">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="user-phone">Số điện thoại:</label>
+                        <input type="tel" id="user-phone">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="user-address">Địa chỉ:</label>
+                        <input type="text" id="user-address">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="user-role">Vai trò (Role):</label>
+                        <select id="user-role" required>
+                            <option value="user">User/Player (Người chơi)</option>
+                            <option value="manager">Manager (Quản lý)</option>
+                            <option value="owner">Owner/Admin (Chủ CLB)</option>
+                            <option value="superadmin">Super Admin (Quản trị cao nhất)</option>
+                        </select>
+                    </div>
+                    
+                    <div class="form-actions">
+                        <button type="button" class="btn btn-secondary" onclick="closeUserModal()">Hủy</button>
+                        <button type="submit" class="btn btn-primary" id="form-submit-btn">Lưu</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div id="view-modal" class="modal">
+        <div class="modal-content large">
+            <div class="modal-header">
+                <h2 id="modal-title-view">Chi tiết Người dùng</h2>
+                <span class="close-btn" onclick="closeViewModal()">&times;</span>
+            </div>
+            <div class="modal-body view-detail">
+                <div class="view-header">
+                    <div class="view-avatar" id="view-avatar">S</div>
+                    <div class="view-info">
+                        <h3 id="view-name">Super Admin</h3>
+                        <div id="view-role-badge">
+                            <span class="role-badge role-superadmin">🛡️ Super Admin</span>
+                        </div>
+                    </div>
+                    <button class="btn btn-primary btn-edit-from-view" onclick="editFromView()">
+                        <span class="material-symbols-outlined">edit</span>
+                        Sửa
+                    </button>
+                </div>
+                <div class="view-content">
+                    <div class="detail-grid">
+                        <div class="detail-item">
+                            <span class="label">ID Người dùng</span>
+                            <span class="value" id="view-id">...</span>
+                        </div>
+                        <div class="detail-item">
+                            <span class="label">Email</span>
+                            <span class="value" id="view-email">...</span>
+                        </div>
+                        <div class="detail-item">
+                            <span class="label">Số điện thoại</span>
+                            <span class="value" id="view-phone">...</span>
+                        </div>
+                        <div class="detail-item">
+                            <span class="label">Địa chỉ</span>
+                            <span class="value" id="view-address">...</span>
+                        </div>
+                        <div class="detail-item">
+                            <span class="label">Thuộc Owner ID</span>
+                            <span class="value" id="view-owner-id">...</span>
+                        </div>
+                        <div class="detail-item">
+                            <span class="label">Ngày tạo</span>
+                            <span class="value" id="view-created">...</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+
     <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-database-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-functions-compat.js"></script>
+    
     <script src="../Admin/app.js"></script>
     <script src="../Admin/super-admin.js"></script>
 </body>

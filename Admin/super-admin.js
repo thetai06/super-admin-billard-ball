@@ -4,6 +4,44 @@ let allUsers = [];
 let filteredUsers = [];
 let allOwners = new Set();
 let revenueData = {};
+let currentViewUserId = null;
+
+// --- THAY ĐỔI LỚN 1: API RENDER ---
+// Đặt URL API Render của bạn ở đây
+const API_BASE_URL = 'https://api-datn-2025.onrender.com';
+
+/**
+ * HÀM HỖ TRỢ MỚI:
+ * Lấy ID Token và gọi API trên Render
+ */
+async function callSuperAdminAPI(endpoint, data) {
+    const user = firebase.auth().currentUser;
+    if (!user) {
+        throw new Error("Người dùng chưa đăng nhập.");
+    }
+    
+    // 1. Lấy ID token mới nhất
+    const token = await user.getIdToken(true); // true = force refresh
+
+    // 2. Gọi API bằng fetch
+    const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}` // Gửi token trong header
+        },
+        body: JSON.stringify(data)
+    });
+
+    // 3. Xử lý response
+    const result = await response.json();
+    if (!response.ok) {
+        // Nếu server trả lỗi (4xx, 5xx), ném lỗi để .catch() bắt được
+        throw new Error(result.error || result.message || `Lỗi ${response.status}`);
+    }
+    return result;
+}
+
 
 /**
  * Khởi tạo trang Super Admin
@@ -11,20 +49,39 @@ let revenueData = {};
 document.addEventListener('DOMContentLoaded', function() {
     console.log('🚀 Khởi tạo Super Admin...');
     
+    // --- THAY ĐỔI LỚN 2: BỎ KHỞI TẠO FUNCTIONS ---
+    // (Chúng ta không dùng Firebase Functions nữa)
+    
     // Kiểm tra đăng nhập
     firebase.auth().onAuthStateChanged(function(user) {
         if (user) {
-            currentSuperAdmin = user;
-            document.getElementById('admin-name').textContent = user.displayName || 'Super Admin';
-            document.getElementById('admin-email').textContent = user.email;
+            // Lấy ID Token để kiểm tra Custom Claim
+            user.getIdTokenResult(true).then((idTokenResult) => {
+                // Kiểm tra xem user có phải Super Admin không
+                if (idTokenResult.claims.role !== 'superadmin') {
+                    alert('Bạn không có quyền Super Admin. Đang đăng xuất...');
+                    console.warn('Người dùng đăng nhập không phải Super Admin:', user.email);
+                    handleLogout();
+                    return;
+                }
+                
+                console.log('✅ Super Admin đã đăng nhập:', user.email);
+                currentSuperAdmin = user;
+                document.getElementById('admin-name').textContent = user.displayName || 'Super Admin';
+                document.getElementById('admin-email').textContent = user.email;
+                
+                // Tải tất cả người dùng
+                loadAllUsers();
+                
+                // Thiết lập event listeners
+                setupEventListeners();
+
+            }).catch((error) => {
+                console.error("Lỗi lấy thông tin vai trò:", error);
+                alert("Lỗi xác thực vai trò Super Admin. Vui lòng đăng nhập lại.");
+                window.location.href = '../Admin/login.html';
+            });
             
-            console.log('✅ Super Admin đã đăng nhập:', user.email);
-            
-            // Tải tất cả người dùng
-            loadAllUsers();
-            
-            // Thiết lập event listeners
-            setupEventListeners();
         } else {
             console.log('❌ Chưa đăng nhập, chuyển hướng...');
             window.location.href = '../Admin/login.html';
@@ -34,6 +91,11 @@ document.addEventListener('DOMContentLoaded', function() {
     // Thiết lập date inputs với giá trị mặc định
     setDefaultDates();
 });
+
+// (Tất cả các hàm từ setDefaultDates đến closeViewModal giữ nguyên)
+// ...
+// ... (bỏ qua các hàm không đổi để cho ngắn gọn)
+// ...
 
 /**
  * Thiết lập giá trị mặc định cho date inputs
@@ -134,18 +196,14 @@ function debounce(func, wait) {
  * Xử lý đăng xuất
  */
 function handleLogout() {
-    const confirmed = confirm('Bạn có chắc chắn muốn đăng xuất?');
-    if (confirmed) {
-        firebase.auth().signOut()
-            .then(() => {
-                console.log('✅ Đăng xuất thành công');
-                window.location.href = '../';
-            })
-            .catch((error) => {
-                console.error('❌ Lỗi đăng xuất:', error);
-                alert('Có lỗi xảy ra khi đăng xuất. Vui lòng thử lại!');
-            });
-    }
+    firebase.auth().signOut()
+        .then(() => {
+            console.log('✅ Đăng xuất thành công');
+            window.location.href = '../';
+        })
+        .catch((error) => {
+            console.error('❌ Lỗi đăng xuất:', error);
+        });
 }
 
 /**
@@ -153,40 +211,40 @@ function handleLogout() {
  */
 function loadAllUsers() {
     console.log('📊 Đang tải TẤT CẢ người dùng...');
+    setTableLoading(true); // Hiển thị loading
     
     db.ref('dataUser')
         .once('value', (snapshot) => {
             allUsers = [];
-            allOwners.clear();
+            allOwners = new Set();
             
             if (snapshot.exists()) {
                 snapshot.forEach((child) => {
                     const userData = child.val();
-                    allUsers.push({
+                    const userEntry = {
                         id: child.key,
                         ...userData
-                    });
+                    };
+                    allUsers.push(userEntry);
                     
-                    // Thu thập danh sách owner
-                    if (userData.ownerId) {
-                        allOwners.add(userData.ownerId);
+                    const role = (userData.role || 'user').toLowerCase();
+                    if (role === 'owner' || role === 'admin') {
+                        allOwners.add(JSON.stringify({id: userEntry.id, name: userEntry.name || 'Chưa có tên'}));
                     }
                 });
             }
             
             console.log(`✅ Đã tải ${allUsers.length} người dùng`);
-            console.log(`✅ Tìm thấy ${allOwners.size} owner khác nhau`);
             
-            // Cập nhật dropdown owner filter
+            allOwners = Array.from(allOwners).map(item => JSON.parse(item));
+            console.log(`✅ Tìm thấy ${allOwners.length} owner khác nhau`);
+            
             updateOwnerFilter();
             updateRevenueOwnerFilter();
-            
-            // Cập nhật thống kê
             updateStatistics();
             
-            // Hiển thị danh sách
             filteredUsers = [...allUsers];
-            renderUsersTable();
+            renderUsersTable(); 
         })
         .catch(error => {
             console.error('❌ Lỗi tải người dùng:', error);
@@ -201,16 +259,12 @@ function updateOwnerFilter() {
     const ownerFilter = document.getElementById('owner-filter');
     if (!ownerFilter) return;
     
-    // Giữ option "Tất cả Owner"
     ownerFilter.innerHTML = '<option value="all">Tất cả Owner</option>';
     
-    // Thêm các owner
-    allOwners.forEach(ownerId => {
-        const ownerUser = allUsers.find(u => u.id === ownerId);
-        const ownerName = ownerUser ? ownerUser.name : 'Chưa có tên';
+    allOwners.forEach(owner => {
         const option = document.createElement('option');
-        option.value = ownerId;
-        option.textContent = `${ownerName} (${ownerId.substring(0, 8)}...)`;
+        option.value = owner.id;
+        option.textContent = `${owner.name} (${owner.id.substring(0, 8)}...)`;
         ownerFilter.appendChild(option);
     });
 }
@@ -222,16 +276,12 @@ function updateRevenueOwnerFilter() {
     const revenueOwnerFilter = document.getElementById('revenue-owner-filter');
     if (!revenueOwnerFilter) return;
     
-    // Giữ option "Tất cả chuỗi cửa hàng"
     revenueOwnerFilter.innerHTML = '<option value="all">Tất cả chuỗi cửa hàng</option>';
     
-    // Thêm các owner
-    allOwners.forEach(ownerId => {
-        const ownerUser = allUsers.find(u => u.id === ownerId);
-        const ownerName = ownerUser ? ownerUser.name : 'Chưa có tên';
+    allOwners.forEach(owner => {
         const option = document.createElement('option');
-        option.value = ownerId;
-        option.textContent = `${ownerName} (${ownerId.substring(0, 8)}...)`;
+        option.value = owner.id;
+        option.textContent = `${owner.name} (${owner.id.substring(0, 8)}...)`;
         revenueOwnerFilter.appendChild(option);
     });
 }
@@ -313,7 +363,8 @@ function loadRevenueReport() {
             if (snapshot.exists()) {
                 snapshot.forEach((child) => {
                     const booking = child.val();
-                    const bookingDate = new Date(booking.createdAt || booking.dateTime); 
+                    const timestamp = booking.createdAt || new Date(booking.dateTime.split('/').reverse().join('-')).getTime();
+                    const bookingDate = new Date(timestamp); 
                     
                     if (bookingDate >= startDate && bookingDate <= endDate) {
                         
@@ -321,10 +372,9 @@ function loadRevenueReport() {
                             
                             const ownerId = booking.storeOwnerId || 'unknown';
                             const storeId = booking.storeId || 'unknown';
-                            
                             const revenue = parseFloat(booking.money || 0); 
                             
-                            if (!revenueData[ownerId]) {
+                            if (revenueData[ownerId] === undefined) {
                                 revenueData[ownerId] = {
                                     total: 0,
                                     orders: 0,
@@ -332,7 +382,7 @@ function loadRevenueReport() {
                                 };
                             }
                             
-                            if (!revenueData[ownerId].stores[storeId]) {
+                            if (revenueData[ownerId].stores[storeId] === undefined) {
                                 revenueData[ownerId].stores[storeId] = {
                                     revenue: 0,
                                     orders: 0
@@ -388,14 +438,12 @@ function displayRevenueReport(totalRevenue, totalOrders) {
     
     if (!revenueDisplay || !revenueDetails) return;
     
-    // Hiển thị tổng quan
     document.getElementById('total-revenue').textContent = formatCurrency(totalRevenue);
     document.getElementById('total-orders').textContent = totalOrders;
     document.getElementById('avg-revenue').textContent = totalOrders > 0 
         ? formatCurrency(totalRevenue / totalOrders) 
         : '0 đ';
     
-    // Hiển thị chi tiết theo owner
     let detailsHTML = '<div class="revenue-details">';
     
     if (Object.keys(revenueData).length === 0) {
@@ -477,7 +525,6 @@ function exportRevenueReport() {
         }
     }
     
-    // Tạo file và download
     const blob = new Blob(["\ufeff" + csvContent], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement('a');
     const url = URL.createObjectURL(blob);
@@ -502,7 +549,6 @@ function applyFilters() {
     console.log('🔍 Áp dụng bộ lọc:', { searchTerm, roleFilter, ownerFilter });
     
     filteredUsers = allUsers.filter(user => {
-        // Lọc theo tìm kiếm
         let matchSearch = true;
         if (searchTerm) {
             const searchableText = [
@@ -516,7 +562,6 @@ function applyFilters() {
             matchSearch = searchableText.includes(searchTerm);
         }
         
-        // Lọc theo vai trò
         let matchRole = true;
         if (roleFilter !== 'all') {
             const userRole = (user.role || 'user').toLowerCase();
@@ -527,10 +572,18 @@ function applyFilters() {
             }
         }
         
-        // Lọc theo owner
         let matchOwner = true;
         if (ownerFilter !== 'all') {
-            matchOwner = user.ownerId === ownerFilter;
+            const userRole = (user.role || 'user').toLowerCase();
+            if(userRole === 'manager') { 
+                matchOwner = user.ownerId === ownerFilter;
+            } 
+            else if (userRole === 'owner' || userRole === 'admin') {
+                matchOwner = user.id === ownerFilter;
+            } 
+            else {
+                matchOwner = false;
+            }
         }
         
         return matchSearch && matchRole && matchOwner;
@@ -562,10 +615,8 @@ function renderUsersTable() {
     
     if (!wrapper) return;
     
-    // Cập nhật số lượng hiển thị
     showingCount.textContent = `Hiển thị ${filteredUsers.length} / ${allUsers.length} người dùng`;
     
-    // Nếu không có người dùng
     if (filteredUsers.length === 0) {
         wrapper.innerHTML = `
             <div class="empty-state">
@@ -579,7 +630,6 @@ function renderUsersTable() {
         return;
     }
     
-    // Tạo HTML table
     let tableHTML = `
         <table>
             <thead>
@@ -605,7 +655,6 @@ function renderUsersTable() {
         const ownerId = user.ownerId || 'N/A';
         const ownerIdShort = ownerId !== 'N/A' ? ownerId.substring(0, 8) + '...' : 'N/A';
         
-        // Chọn màu avatar
         const avatarColors = [
             'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
             'linear-gradient(135deg, #f093fb 0%, #f5576c 100%)',
@@ -613,14 +662,15 @@ function renderUsersTable() {
             'linear-gradient(135deg, #43e97b 0%, #38f9d7 100%)',
             'linear-gradient(135deg, #fa709a 0%, #fee140 100%)'
         ];
-        const colorIndex = user.id.charCodeAt(0) % avatarColors.length;
+        const colorIndex = (user.id ? user.id.charCodeAt(0) : 0) % avatarColors.length;
         
-        // Role badge
         let roleBadge = '';
         if (role === 'admin' || role === 'owner') {
             roleBadge = '<span class="role-badge role-owner">👑 Owner/Admin</span>';
         } else if (role === 'manager') {
             roleBadge = '<span class="role-badge role-manager">⚙️ Manager</span>';
+        } else if (role === 'superadmin') {
+            roleBadge = '<span class="role-badge role-superadmin">🛡️ Super Admin</span>';
         } else {
             roleBadge = '<span class="role-badge role-user">👤 User/Player</span>';
         }
@@ -646,7 +696,7 @@ function renderUsersTable() {
                         <button class="btn-icon btn-view" onclick="viewUserDetail('${user.id}')" title="Xem chi tiết">
                             <span class="material-symbols-outlined">visibility</span>
                         </button>
-                        <button class="btn-icon btn-edit" onclick="editUser('${user.id}')" title="Chỉnh sửa">
+                        <button class="btn-icon btn-edit" onclick="openUserModal('edit', '${user.id}')" title="Chỉnh sửa">
                             <span class="material-symbols-outlined">edit</span>
                         </button>
                         <button class="btn-icon btn-delete" onclick="confirmDeleteUser('${user.id}', '${name}')" title="Xóa">
@@ -663,7 +713,45 @@ function renderUsersTable() {
         </table>
     `;
     
-    wrapper.innerHTML = tableHTML;
+    setTableLoading(false, tableHTML);
+}
+
+/**
+ * Hiển thị/ẩn loading state cho bảng
+ */
+function setTableLoading(isLoading, contentHTML = '') {
+    const wrapper = document.getElementById('table-wrapper');
+    if (!wrapper) return;
+    if (isLoading) {
+        wrapper.innerHTML = `
+            <div class="loading">
+                <div class="icon">
+                    <span class="material-symbols-outlined">hourglass_empty</span>
+                </div>
+                <h3>Đang tải dữ liệu...</h3>
+                <p>Vui lòng đợi trong giây lát</p>
+            </div>
+        `;
+    } else {
+        wrapper.innerHTML = contentHTML;
+    }
+}
+
+/**
+ * Hiển thị lỗi (dùng khi fetch lỗi)
+ */
+function showError(message) {
+     const wrapper = document.getElementById('table-wrapper');
+     if (!wrapper) return;
+     wrapper.innerHTML = `
+        <div class="empty-state">
+            <div class="icon" style="color: #f5576c;">
+                <span class="material-symbols-outlined">error</span>
+            </div>
+            <h3>Rất tiếc, đã có lỗi xảy ra</h3>
+            <p>${message}</p>
+        </div>
+    `;
 }
 
 /**
@@ -676,69 +764,237 @@ function viewUserDetail(userId) {
         return;
     }
     
+    currentViewUserId = userId;
+    
+    const viewModal = document.getElementById('view-modal');
+    if (!viewModal) {
+         console.error("Không tìm thấy #view-modal trong HTML");
+         alert(`CHI TIẾT:\nID: ${user.id}\nTên: ${user.name}\nEmail: ${user.email}\nRole: ${user.role}`);
+         return;
+    }
+
+    const avatar = (user.name || 'U')[0].toUpperCase();
+    document.getElementById('view-avatar').textContent = avatar;
+    
+    document.getElementById('view-name').textContent = user.name || 'Chưa có tên';
+    
     const role = (user.role || 'user').toLowerCase();
-    let roleText = '👤 User/Player';
-    if (role === 'admin' || role === 'owner') roleText = '👑 Owner/Admin';
-    else if (role === 'manager') roleText = '⚙️ Manager';
+    let roleBadge = '';
+    if (role === 'admin' || role === 'owner') {
+        roleBadge = '<span class="role-badge role-owner">👑 Owner/Admin</span>';
+    } else if (role === 'manager') {
+        roleBadge = '<span class="role-badge role-manager">⚙️ Manager</span>';
+    } else if (role === 'superadmin') {
+        roleBadge = '<span class="role-badge role-superadmin">🛡️ Super Admin</span>';
+    } else {
+        roleBadge = '<span class="role-badge role-user">👤 User/Player</span>';
+    }
+    document.getElementById('view-role-badge').innerHTML = roleBadge;
     
-    const details = `
-📋 THÔNG TIN CHI TIẾT NGƯỜI DÙNG
-${'='.repeat(50)}
-
-👤 Tên: ${user.name || 'Chưa có'}
-📧 Email: ${user.email || 'Chưa có'}
-📱 SĐT: ${user.phone || 'Chưa có'}
-📍 Địa chỉ: ${user.address || 'Chưa có'}
-🎭 Vai trò: ${roleText}
-
-🆔 User ID: ${user.id}
-👥 Owner ID: ${user.ownerId || 'N/A'}
-
-${'='.repeat(50)}
-    `;
+    document.getElementById('view-id').textContent = user.id;
+    document.getElementById('view-email').textContent = user.email || 'Chưa có';
+    document.getElementById('view-phone').textContent = user.phone || 'Chưa có';
+    document.getElementById('view-address').textContent = user.address || 'Chưa có';
+    document.getElementById('view-owner-id').textContent = user.ownerId || 'N/A';
     
-    alert(details);
+    const createdDate = user.createdAt ? new Date(user.createdAt).toLocaleString('vi-VN') : 'Không rõ';
+    document.getElementById('view-created').textContent = createdDate;
+    
+    viewModal.style.display = 'block';
     console.log('👁️ Xem chi tiết:', user);
 }
 
+function closeViewModal() {
+    const viewModal = document.getElementById('view-modal');
+    if (viewModal) viewModal.style.display = 'none';
+    currentViewUserId = null;
+}
+
+function editFromView() {
+    if (currentViewUserId) {
+        closeViewModal();
+        openUserModal('edit', currentViewUserId);
+    }
+}
+
+// === CÁC HÀM XỬ LÝ MODAL (THÊM MỚI/SỬA) ===
+
+const userModal = document.getElementById('user-modal');
+const modalTitle = document.getElementById('modal-title');
+const userForm = document.getElementById('user-form');
+const formMode = document.getElementById('user-form-mode');
+const formUserId = document.getElementById('user-form-id');
+const passwordGroup = document.getElementById('password-group');
+const userEmailInput = document.getElementById('user-email');
+const userPasswordInput = document.getElementById('user-password');
+const submitBtn = document.getElementById('form-submit-btn');
+
 /**
- * Chỉnh sửa người dùng
+ * Mở Modal
  */
-function editUser(userId) {
-    const user = allUsers.find(u => u.id === userId);
-    if (!user) {
-        alert('❌ Không tìm thấy người dùng');
-        return;
+function openUserModal(mode, userId = null) {
+    userForm.reset(); 
+    submitBtn.disabled = false;
+    submitBtn.textContent = 'Lưu';
+    
+    userForm.dataset.oldRole = '';
+    
+    if (mode === 'add') {
+        modalTitle.textContent = 'Thêm Người dùng mới';
+        formMode.value = 'add';
+        formUserId.value = '';
+        
+        passwordGroup.style.display = 'block';
+        userPasswordInput.required = true;
+        userEmailInput.disabled = false;
+
+    } else if (mode === 'edit') {
+        const user = allUsers.find(u => u.id === userId);
+        if (!user) {
+            alert('Không tìm thấy người dùng!');
+            return;
+        }
+        
+        modalTitle.textContent = `Sửa Người dùng: ${user.name || user.email}`;
+        formMode.value = 'edit';
+        formUserId.value = userId;
+        
+        document.getElementById('user-name').value = user.name || '';
+        document.getElementById('user-email').value = user.email || '';
+        document.getElementById('user-phone').value = user.phone || '';
+        document.getElementById('user-address').value = user.address || '';
+        document.getElementById('user-role').value = user.role || 'user';
+        
+        userForm.dataset.oldRole = user.role || 'user';
+        
+        passwordGroup.style.display = 'none';
+        userPasswordInput.required = false;
+        userEmailInput.disabled = true; 
     }
     
-    const newName = prompt('✏️ Nhập tên mới:', user.name || '');
-    if (newName === null) return; // User cancelled
+    userModal.style.display = 'block';
+}
+
+/**
+ * Đóng Modal
+ */
+function closeUserModal() {
+    userModal.style.display = 'none';
+}
+
+
+// --- THAY ĐỔI LỚN 3: SỬA HÀM handleUserFormSubmit ---
+/**
+ * 🌟 HÀM QUAN TRỌNG ĐÃ SỬA LẠI HOÀN CHỈNH 🌟
+ * Xử lý khi nhấn nút "Lưu" trên form (GỌI API RENDER)
+ */
+async function handleUserFormSubmit(event) {
+    event.preventDefault(); // Ngăn form tải lại trang
     
-    const newPhone = prompt('✏️ Nhập số điện thoại mới:', user.phone || '');
-    if (newPhone === null) return;
+    // Hiển thị loading
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Đang xử lý...';
+
+    const mode = formMode.value;
+    const userId = formUserId.value;
     
-    const newAddress = prompt('✏️ Nhập địa chỉ mới:', user.address || '');
-    if (newAddress === null) return;
+    // Lấy dữ liệu từ form
+    const data = {
+        name: document.getElementById('user-name').value,
+        email: document.getElementById('user-email').value,
+        phone: document.getElementById('user-phone').value,
+        address: document.getElementById('user-address').value,
+        role: document.getElementById('user-role').value,
+    };
     
-    const newRole = prompt('✏️ Nhập vai trò mới (admin/manager/user):', user.role || 'user');
-    if (newRole === null) return;
+    try {
+        if (mode === 'add') {
+            // === LOGIC THÊM MỚI (GỌI API RENDER) ===
+            const password = userPasswordInput.value;
+            if (password.length < 6) {
+                throw new Error('Mật khẩu phải có ít nhất 6 ký tự!');
+            }
+            
+            // 1. Gọi API /api/sa/create-user
+            const result = await callSuperAdminAPI('/api/sa/create-user', { ...data, password: password });
+            
+            alert(`Thêm người dùng thành công! UID: ${result.uid}`);
+
+        } else if (mode === 'edit') {
+            // === LOGIC SỬA ===
+            const oldRole = userForm.dataset.oldRole;
+            const newRole = data.role;
+            
+            // 1. Cập nhật database (việc này client làm được)
+            const updates = {
+                name: data.name,
+                phone: data.phone,
+                address: data.address,
+                role: data.role // Cập nhật role trong DB
+            };
+            
+            await db.ref('dataUser/' + userId).update(updates);
+            
+            // 2. Cập nhật role (Custom Claim) nếu có thay đổi (gọi API)
+            if (oldRole !== newRole) {
+                console.log(`Đang thay đổi vai trò (Auth) từ ${oldRole} -> ${newRole}`);
+                
+                // Gọi API /api/sa/update-role
+                await callSuperAdminAPI('/api/sa/update-role', { uid: userId, role: newRole });
+                
+                alert('Cập nhật thông tin và vai trò (Auth) thành công!');
+            } else {
+                alert('Cập nhật thông tin (DB) thành công!');
+            }
+        }
+        
+        closeUserModal();
+        loadAllUsers(); // Tải lại bảng
+        
+    } catch (error) {
+        console.error('❌ Lỗi handleUserFormSubmit:', error);
+        alert(`Lỗi: ${error.message}`); // Hiển thị lỗi thật
+    }
+
+    // Mở lại nút dù thành công hay thất bại
+    submitBtn.disabled = false;
+    submitBtn.textContent = 'Lưu';
+}
+
+
+// --- THAY ĐỔI LỚN 4: SỬA HÀM XÓA ---
+/**
+ * HÀM SỬA LẠI:
+ * Xử lý Xóa Người dùng (GỌI API RENDER)
+ * (Thay thế hàm confirmDeleteUser_Direct nguy hiểm của bạn)
+ */
+async function confirmDeleteUser(userId, name) {
+    if (!userId || !name) return;
+
+    // Ngăn Super Admin tự xóa mình
+    if (currentSuperAdmin && userId === currentSuperAdmin.uid) {
+        alert("Bạn không thể tự xóa tài khoản Super Admin của mình!");
+        return;
+    }
+
+    const confirmed = confirm(`Bạn có chắc chắn muốn XÓA vĩnh viễn người dùng: ${name} (ID: ${userId})? \nHành động này sẽ xóa cả tài khoản đăng nhập (Auth) và dữ liệu (DB). Không thể hoàn tác.`);
     
-    // Cập nhật vào Firebase
-    const updates = {};
-    if (newName) updates.name = newName;
-    if (newPhone) updates.phone = newPhone;
-    if (newAddress) updates.address = newAddress;
-    if (newRole) updates.role = newRole.toLowerCase();
-    
-    db.ref('dataUser/' + userId)
-        .update(updates)
-        .then(() => {
-            console.log('✅ Đã cập nhật người dùng');
-            alert('✅ Cập nhật thành công!');
-            loadAllUsers(); // Reload
-        })
-        .catch(error => {
-            console.error('❌ Lỗi cập nhật:', error);
-            alert('❌ Không thể cập nhật. Vui lòng thử lại!');
-        });
+    if (confirmed) {
+        console.log(`Đang xóa người dùng: ${userId}`);
+        try {
+            // Hiển thị loading cho bảng
+            setTableLoading(true);
+
+            // 1. Gọi API /api/sa/delete-user
+            await callSuperAdminAPI('/api/sa/delete-user', { uid: userId });
+
+            alert(`Đã xóa người dùng ${name} thành công!`);
+            loadAllUsers(); // Tải lại bảng
+        
+        } catch (error) {
+            console.error('❌ Lỗi xóa người dùng:', error);
+            alert(`Lỗi khi xóa người dùng: ${error.message}`);
+            renderUsersTable(); // Render lại bảng (dù có lỗi)
+        }
+    }
 }
